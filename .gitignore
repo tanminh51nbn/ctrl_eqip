@@ -1,1 +1,20 @@
+# Build artifacts
 /target
+
+# AI Models (ONNX files are large and should be handled via Git LFS or external download)
+/models/*.onnx
+/models/*.bin
+/models/*.weights
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
