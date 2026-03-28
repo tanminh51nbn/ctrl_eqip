@@ -1,0 +1,42 @@
+[package]
+name = "ctrl_eqip"
+version = "0.1.0"
+edition = "2024"
+authors = ["Tan Minh <tanminh51nbn@gmail.com>"]
+description = "High-performance Edge AI framework for human detection and device control via ESP32/STM32."
+repository = "https://github.com/tanminh/ctrl_eqip" # Placeholder
+keywords = ["edge-ai", "yolo", "esp32", "robotics", "computer-vision"]
+categories = ["embedded", "science", "hardware-support"]
+
+[dependencies]
+# --- Core AI (ONNX Runtime) ---
+ort = { version = "2.0.0-rc.12", features = ["ndarray", "tensorrt", "cuda", "openvino", "directml"] }
+ndarray = "0.17"
+
+# --- Camera & Vision ---
+nokhwa = { version = "0.10", features = ["input-msmf"] }
+image = "0.25"
+fast_image_resize = "2.7"
+
+# --- Protocol & Communication ---
+serialport = "4"
+crc = "3"
+
+# --- Utilities & Performance ---
+thiserror = "2"
+log = "0.4"
+ctrlc = "3"
+rayon = "1.10"
+crossbeam-channel = "0.5.15"
+
+# --- Visualization (Examples) ---
+minifb = "0.25"
+imageproc = "0.25"
+rusttype = "0.9"
+
+# RTSP Background (Optional)
+opencv = { version = "0.90", optional = true, features = ["videoio", "imgproc"] }
+
+[[example]]
+name = "main_loop"
+path = "examples/main_loop.rs"
