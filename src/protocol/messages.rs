@@ -86,6 +86,14 @@ pub enum Message {
 
     /// Either direction: signal an error condition.
     Error { code: ErrorCode },
+
+    /// Laptop → ESP32: Raw AI tracking data for the primary target.
+    ///
+    /// distance: f32 (meters)
+    /// x: f32 (pixel center)
+    /// y: f32 (pixel center)
+    /// count: u8 (number of people)
+    TargetInfo { distance: f32, x: f32, y: f32, count: u8 },
 }
 
 /// Wire-level type byte for each message variant.
@@ -97,6 +105,7 @@ pub enum MessageTypeId {
     FanOff = 0x03,
     Heartbeat = 0x10,
     Ack = 0x11,
+    TargetInfo = 0x20,
     Error = 0xFE,
 }
 
@@ -122,6 +131,7 @@ impl Message {
             Message::FanOff => MessageTypeId::FanOff as u8,
             Message::Heartbeat { .. } => MessageTypeId::Heartbeat as u8,
             Message::Ack { .. } => MessageTypeId::Ack as u8,
+            Message::TargetInfo { .. } => MessageTypeId::TargetInfo as u8,
             Message::Error { .. } => MessageTypeId::Error as u8,
         }
     }
@@ -136,6 +146,14 @@ impl Message {
             Message::FanOff => vec![],
             Message::Heartbeat { uptime_ms } => uptime_ms.to_be_bytes().to_vec(),
             Message::Ack { acked_type } => vec![*acked_type],
+            Message::TargetInfo { distance, x, y, count } => {
+                let mut p = Vec::with_capacity(13);
+                p.push(*count);
+                p.extend_from_slice(&distance.to_be_bytes());
+                p.extend_from_slice(&x.to_be_bytes());
+                p.extend_from_slice(&y.to_be_bytes());
+                p
+            }
             Message::Error { code } => vec![*code as u8],
         }
     }
@@ -190,6 +208,20 @@ impl Message {
                     });
                 }
                 Ok(Message::Ack { acked_type: payload[0] })
+            }
+            0x20 => {
+                // TargetInfo: count (1B) + 3 x f32 (12B) = 13 bytes
+                if payload.len() < 13 {
+                    return Err(MessageError::PayloadTooShort {
+                        expected: 13,
+                        got: payload.len(),
+                    });
+                }
+                let count = payload[0];
+                let distance = f32::from_be_bytes([payload[1], payload[2], payload[3], payload[4]]);
+                let x = f32::from_be_bytes([payload[5], payload[6], payload[7], payload[8]]);
+                let y = f32::from_be_bytes([payload[9], payload[10], payload[11], payload[12]]);
+                Ok(Message::TargetInfo { distance, x, y, count })
             }
             0xFE => {
                 // Error: 1 byte error code

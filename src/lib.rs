@@ -34,8 +34,8 @@
 //!         if let Some(res) = handle.try_recv() {
 //!             let tracking = analyzer.analyze(&res.detection.boxes, &estimator, 0);
 //!             if tracking.has_person {
-//!                 println!("Detected {} person(s). Closest: {:.2}m", 
-//!                     tracking.person_count, 
+//!                 println!("Detected {} person(s). Closest: {:.2}m",
+//!                     tracking.person_count,
 //!                     tracking.closest_distance_m.unwrap_or(0.0));
 //!             }
 //!         }
@@ -65,9 +65,14 @@ use std::ptr;
 // Use internal modules for FFI implementation
 use crate::engine::{CameraConfig, DetectorPipeline, EngineConfig, EngineHandle};
 use crate::logic::{DistanceEstimator, SceneAnalyzer};
+use crate::protocol::messages::Message;
+use crate::transport::{SerialTransport, Transport};
 
 /// Opaque handle representing the AI Detection Pipeline.
 pub type CePipelineHandle = *mut c_void;
+
+/// Opaque handle representing the Serial Controller (ESP32).
+pub type CeControllerHandle = *mut c_void;
 
 /// C-compatible representation of a Bounding Box.
 #[repr(C)]
@@ -78,7 +83,7 @@ pub struct CeBoundingBox {
     pub height: f32,
     pub confidence: f32,
     pub class_id: u32,
-} 
+}
 
 /// C-compatible tracking result for a single frame.
 #[repr(C)]
@@ -87,8 +92,14 @@ pub struct CeTrackingResult {
     pub person_count: u32,
     /// Meters to the closest person (0.0 if not found).
     pub closest_distance_m: f32,
+    /// Meters to the furthest person (0.0 if not found).
+    pub furthest_distance_m: f32,
     /// Whether any person is present.
     pub has_person: bool,
+    /// Center X pixel of the closest person.
+    pub primary_x: f32,
+    /// Center Y pixel of the closest person.
+    pub primary_y: f32,
 }
 
 /// Starts the AI detection pipeline.
@@ -141,11 +152,20 @@ pub unsafe extern "C" fn ce_pipeline_try_recv(
 
     if let Some(res) = pipeline.try_recv() {
         let tracking = analyzer.analyze(&res.detection.boxes, &estimator, 0);
-        
+
         unsafe {
             (*out_result).person_count = tracking.person_count as u32;
             (*out_result).closest_distance_m = tracking.closest_distance_m.unwrap_or(0.0);
+            (*out_result).furthest_distance_m = tracking.furthest_distance_m.unwrap_or(0.0);
             (*out_result).has_person = tracking.has_person;
+
+            if let Some(bbox) = tracking.primary_target_bbox {
+                (*out_result).primary_x = bbox.x + (bbox.width / 2.0);
+                (*out_result).primary_y = bbox.y + (bbox.height / 2.0);
+            } else {
+                (*out_result).primary_x = -1.0;
+                (*out_result).primary_y = -1.0;
+            }
         }
         return 1;
     }
@@ -173,6 +193,68 @@ pub unsafe extern "C" fn ce_get_version() -> *mut c_char {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ce_free_string(s: *mut c_char) {
     if !s.is_null() {
-        unsafe { let _ = CString::from_raw(s); }
+        unsafe {
+            let _ = CString::from_raw(s);
+        }
+    }
+}
+
+// --- Controller API ---
+
+/// Opens a serial port to the ESP32.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ce_controller_open(port_name: *const c_char) -> CeControllerHandle {
+    if port_name.is_null() {
+        return ptr::null_mut();
+    }
+
+    let c_str = unsafe { CStr::from_ptr(port_name) };
+    let port = match c_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return ptr::null_mut(),
+    };
+
+    match SerialTransport::open(port) {
+        Ok(transport) => Box::into_raw(Box::new(transport)) as CeControllerHandle,
+        Err(e) => {
+            log::error!("[FFI] Failed to open serial port {}: {}", port, e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Sends AI tracking data (Distance, X, Y) for the primary target to the ESP32.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ce_controller_send_tracking(
+    handle: CeControllerHandle,
+    result: *const CeTrackingResult,
+) {
+    if handle.is_null() || result.is_null() {
+        return;
+    }
+
+    let transport = unsafe { &mut *(handle as *mut SerialTransport) };
+    let res = unsafe { &*result };
+
+    if res.has_person {
+        let msg = Message::TargetInfo {
+            distance: res.closest_distance_m,
+            x: res.primary_x,
+            y: res.primary_y,
+            count: res.person_count as u8,
+        };
+
+        if let Err(e) = transport.send(&msg) {
+            log::warn!("[FFI] Failed to send TargetInfo: {}", e);
+        }
+    }
+}
+
+/// Closes the controller and releases resources.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ce_controller_close(handle: CeControllerHandle) {
+    if !handle.is_null() {
+        let _ = unsafe { Box::from_raw(handle as *mut SerialTransport) };
+        log::info!("[FFI] Controller closed and handle released.");
     }
 }

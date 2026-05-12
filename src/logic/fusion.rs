@@ -29,6 +29,10 @@ pub struct TrackingResult {
     pub people: Vec<PersonDetail>,
     /// Distance of the closest person (if any) in meters.
     pub closest_distance_m: Option<f32>,
+    /// Distance of the furthest person (if any) in meters.
+    pub furthest_distance_m: Option<f32>,
+    /// Bounding box of the primary target (the closest person).
+    pub primary_target_bbox: Option<BoundingBox>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -56,6 +60,8 @@ impl SceneAnalyzer {
     ) -> TrackingResult {
         let mut people = Vec::new();
         let mut closest_distance_m: Option<f32> = None;
+        let mut furthest_distance_m: Option<f32> = None;
+        let mut primary_target_bbox: Option<BoundingBox> = None;
 
         for bbox in boxes {
             if bbox.class_id == person_class_id {
@@ -69,10 +75,23 @@ impl SceneAnalyzer {
                 });
 
                 match closest_distance_m {
-                    None => closest_distance_m = Some(distance),
+                    None => {
+                        closest_distance_m = Some(distance);
+                        primary_target_bbox = Some(bbox.clone());
+                    }
                     Some(closest) => {
                         if distance < closest {
                             closest_distance_m = Some(distance);
+                            primary_target_bbox = Some(bbox.clone());
+                        }
+                    }
+                }
+
+                match furthest_distance_m {
+                    None => furthest_distance_m = Some(distance),
+                    Some(furthest) => {
+                        if distance > furthest {
+                            furthest_distance_m = Some(distance);
                         }
                     }
                 }
@@ -84,7 +103,8 @@ impl SceneAnalyzer {
             person_count: people.len(),
             people,
             closest_distance_m,
+            furthest_distance_m,
+            primary_target_bbox,
         }
     }
 }
-

@@ -9,8 +9,10 @@
 //! Future: TCP/UDP transport for WiFi can implement the same trait.
 
 pub mod serial;
+pub mod wifi;
 
 pub use serial::SerialTransport;
+pub use wifi::WifiTransport;
 
 use crate::protocol::messages::Message;
 
